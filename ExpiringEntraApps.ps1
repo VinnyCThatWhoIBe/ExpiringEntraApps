@@ -1,89 +1,90 @@
-# Enter your information here
-$clientid = ""
+﻿# Defines the Tenant and App registration details
 $tenantid = ""
-$certificate = Get-Item -Path "Cert:\CurrentUser\My\..." # Replace the "..." with the thumbprint of the certificate
+$clientid = ""
+$CertificateThumbprint = ""
+
 
 # Connects to Microsoft Graph
-Connect-MgGraph -TenantId $tenantid -ClientId $clientid -CertificateThumbprint $certificate.Thumbprint
+Connect-MgGraph -TenantId $tenantid -ClientId $clientid -CertificateThumbprint (Get-Item -Path "Cert:\CurrentUser\My\$CertificateThumbprint").Thumbprint
 
 # Finds all Enterprise Apps
-$EnterpriseApps = Get-MgServicePrincipal -All -Property AppId,createdDateTime,Displayname,id,KeyCredentials,Notes,PreferredSingleSignOnMode,ServicePrincipalType
+$EnterpriseApps = Get-MgServicePrincipal -All -Property appid,createdDateTime,displayname,id,keycredentials,notes,preferredsinglesignonmode,serviceprincipaltype
 
 # Finds all App Registrations
-$AppRegistrations = Get-MgApplication -All -Property AppId,AppRoles,CreatedDateTime,DisplayName,Id,Notes,PasswordCredentials,KeyCredentials
+$AppRegistrations = Get-MgApplication -all -property appid,approles,createddatetime,displayname,id,notes,passwordcredentials,keycredentials
 
-# Correlates Enterprise Apps with their partner App Registration and builds the $Results array
+# Correlates Enterprise Apps with their corresponding App Registration
 $Results = @(
-    ForEach($EnterpriseApp in $enterpriseApps){
+    ForEach($EnterpriseApp in $EnterpriseApps){
 
         # Retrieves owners for Enterprise Apps
-        $Owners = @(Get-MgServicePrincipalOwner -ServicePrincipalId $EnterpriseApp.Id)
+        $Owners = @(Get-MgServicePrincipalOwner -ServicePrincipalID $enterpriseapp.ID)
         $EnterpriseOwners = $null
         $EnterpriseOwners = @(
-            ForEach($Owner in $Owners){
-                Try{Get-MgUser -UserId $Owner.id -ErrorAction Stop | Select-Object -ExpandProperty DisplayName} Catch {$EnterpriseApps | Where-Object Id -EQ $Owner.Id | Select-Object -ExpandProperty DisplayName}
+            ForEach($owner in $owners){                
+                Try{Get-MgUser -UserID $owner.id -erroraction Stop | Select-Object -ExpandProperty DisplayName} Catch {$EnterpriseApps | Where-Object Id -eq $owner.id | Select-Object -ExpandProperty DisplayName} # Apparently some can be owned by other enterprise apps, so I added this try/catch
             }
         )
         $EnterpriseOwnersCombined = $EnterpriseOwners -join ","
-
+        
         # Finds the matching App Registration
-        $MatchingAppRegistration = $AppRegistrations | Where-Object AppId -EQ $EnterpriseApp.AppId
+        $MatchingAppRegistration = $AppRegistrations | Where-Object AppId -eq $enterpriseapp.AppId
 
-        # Obtains the Owners value for the matching App Registration
+        # Obtains the Owners value for the matching App Registation
         If($MatchingAppRegistration){
-            $Owners = @(Get-MgApplicationOwner -ApplicationId $MatchingAppRegistration.Id)
+            $Owners = @(Get-MgApplicationOwner -ApplicationId $MatchingAppRegistration.ID)
             $AppOwners = $null
             $AppOwners = @(
-                ForEach($Owner in $Owners){
-                    Try{Get-MgUser -UserId $Owner.Id -ErrorAction Stop | Select-Object -ExpandProperty DisplayName} Catch {$EnterpriseApps | Where-Object Id -EQ $Owner.Id | Select-Object -ExpandProperty DisplayName}
+                ForEach($owner in $owners){
+                    Try{Get-MgUser -UserID $owner.id -erroraction Stop | Select-Object -ExpandProperty DisplayName} Catch {$EnterpriseApps | Where-Object Id -eq $owner.id | Select-Object -ExpandProperty DisplayName} # Apparently some can be owned by other enterprise apps, so I added this try/catch
                 }
             )
             $AppOwnersCombined = $AppOwners -join ","
         } Else {$AppOwnersCombined = $null}
 
-        # Builds the custom object to output to the $Results array
-        [PSCustomObject]@{
-            EnterpriseApp = $EnterpriseApp.DisplayName
-            EnterpriseObjectId = $EnterpriseApp.Id
-            EnterpriseApplicationId = $EnterpriseApp.AppId
-            EnterpriseCreated = (Get-Date "$($EnterpriseApp.AdditionalProperties.createdDateTime)").ToString("yyyy-MM-dd")
-            EnterpriseCertificateExpiration = (($EnterpriseApp | Select-Object -ExpandProperty KeyCredentials | Select-Object -ExpandProperty EndDateTime | Sort-Object | Get-Unique) | ForEach-Object {[datetime]::Parse($_)} | Sort-Object -Descending | Select-Object -First 1)
-            EnterprisePreferredSingleSignOnMode = $EnterpriseApp.PreferredSingleSignOnMode
-            EnterpriseServicePrincipalType = $EnterpriseApp.ServicePrincipalType
+        # Builds the custom object to export to CSV
+        [pscustomobject]@{
+            EnterpriseApp = $enterpriseapp.DisplayName
+            EnterpriseObjectID = $enterpriseapp.Id
+            EnterpriseApplicationID = $enterpriseapp.AppId
+            EnterpriseCreated = (Get-Date "$($enterpriseapp.additionalproperties.createdDateTime)").ToString("yyyy-MM-dd") # the createdDateTime key is CASE SENSITIVE specifically for the enterprise app
+            EnterpriseCertificateExpiration = (($enterpriseapp | Select-Object -ExpandProperty keycredentials | Select-Object -ExpandProperty enddatetime | Sort-Object | Get-Unique) | ForEach-Object { [datetime]::Parse($_) } | Sort-Object -Descending | Select-Object -first 1)
+            EnterprisePreferredSingleSignOnMode = $enterpriseapp.PreferredSingleSignOnMode
+            EnterpriseServicePrincipalType = $enterpriseapp.serviceprincipaltype
             EnterpriseOwners = $EnterpriseOwnersCombined
-            EnterpriseNotes = $EnterpriseApp.Notes
+            EnterpriseNotes = $enterpriseapp.notes
             AppRegistration = $MatchingAppRegistration.DisplayName
-            AppObjectId = $MatchingAppRegistration.Id
-            AppApplicationId = $MatchingAppRegistration.AppId
+            AppObjectID = $MatchingAppRegistration.Id
+            AppApplicationID = $MatchingAppRegistration.AppId
             AppCreated = If($MatchingAppRegistration.CreatedDateTime){(Get-Date "$($MatchingAppRegistration.CreatedDateTime)").ToString("yyyy-MM-dd")}Else{$null}
-            AppClientSecretExpiration = (($MatchingAppRegistration | Select-Object -ExpandProperty PasswordCredentials | Select-Object -ExpandProperty EndDateTime | Sort-Object | Get-Unique) | ForEach-Object {[datetime]::Parse($_)} | Sort-Object -Descending | Select-Object -First 1)
-            AppCertificateExpiration = (($MatchingAppRegistration | Select-Object -ExpandProperty KeyCredentials | Select-Object -ExpandProperty EndDateTime | Sort-Object | Get-Unique) | ForEach-Object {[datetime]::Parse($_)} | Sort-Object -Descending | Select-Object -First 1)
+            AppClientSecretExpiration = (($MatchingAppRegistration | Select-Object -ExpandProperty passwordcredentials | Select-Object -ExpandProperty enddatetime | Sort-Object | Get-Unique) | ForEach-Object { [datetime]::Parse($_) } | Sort-Object -Descending | Select-Object -first 1)
+            AppCertificateExpiration = (($MatchingAppRegistration | Select-Object -ExpandProperty keycredentials | Select-Object -ExpandProperty enddatetime |sort-object | Get-Unique) | ForEach-Object { [datetime]::Parse($_) } | Sort-Object -Descending | Select-Object -first 1)
             AppOwners = $AppOwnersCombined
-            AppNotes = $MatchingAppRegistration.Notes
+            AppNotes = $MatchingAppRegistration.notes
         }
     }
 )
 
-# Adds any App Registrations that don't have a corresponding Enterprise Application to the array
+# Adds any App Registrations that do not have a corresponding Enterprise Application to the array
 $Results += @(
     ForEach($AppRegistration in $AppRegistrations){
-        If(($EnterpriseApps | Where-Object AppId -EQ $AppRegistration.appid) -eq $null){
+        If(($enterpriseapps | Where-Object appid -eq $appRegistration.appid) -eq $null){
 
-            # Obtains the Owners value for the App Registration
-            $Owners = @(Try{Get-MgApplicationOwner -ApplicationId $appRegistration.AppId -ErrorAction Stop}Catch{$null})
+            # Obtains the Owners value for the App Registation
+            $Owners = @(Try{Get-MgApplicationOwner -ApplicationId $appRegistration.appid -ErrorAction Stop}Catch{$null})
             $AppOwners = $null
             $AppOwners = @(
-                ForEach($Owner in $Owners){
-                    Try{Get-MgUser -UserId $Owner.Id -ErrorAction Stop | Select-Object -ExpandProperty DisplayName}Catch{$null}
-                }        
+                ForEach($owner in $owners){
+                    Try{Get-MgUser -UserID $owner.id -erroraction Stop | Select-Object -ExpandProperty DisplayName}Catch{$null}
+                }
             )
             $AppOwnersCombined = $AppOwners -join ","
-
-            # Builds the custom object to export to CSV                
-            [PSCustomObject]@{
+            
+            # Builds the custom object to export to CSV
+            [pscustomobject]@{
                 EnterpriseApp = $null
-                EnterpriseObjectId = $null
-                EnterpriseApplicationId = $null
+                EnterpriseObjectID = $null
+                EnterpriseApplicationID = $null
                 EnterpriseCreated = $null
                 EnterpriseCertificateExpiration = $null
                 EnterprisePreferredSingleSignOnMode = $null
@@ -91,11 +92,11 @@ $Results += @(
                 EnterpriseOwners = $null
                 EnterpriseNotes = $null
                 AppRegistration = $AppRegistration.DisplayName
-                AppObjectId = $AppRegistration.Id
+                AppObjectID = $AppRegistration.Id
                 AppCreated = (Get-Date "$($AppRegistration.CreatedDateTime)").ToString("yyyy-MM-dd")
-                AppApplicationId = $AppRegistration.AppId                
-                AppClientSecretExpiration = (($AppRegistration | Select-Object -ExpandProperty PasswordCredentials | Select-Object -ExpandProperty EndDateTime | Sort-Object | Get-Unique) | ForEach-Object {[datetime]::Parse($_)} | Sort-Object -Descending | Select-Object -First 1)
-                AppCertificateExpiration = (($AppRegistration | Select-Object -ExpandProperty KeyCredentials | Select-Object -ExpandProperty EndDateTime | Sort-Object | Get-Unique) | ForEach-Object {[datetime]::Parse($_)} | Sort-Object -Descending | Select-Object -First 1)
+                AppApplicationID = $AppRegistration.AppId
+                AppClientSecretExpiration = (($appregistration | Select-Object -ExpandProperty passwordcredentials | Select-Object -ExpandProperty enddatetime | Sort-Object | Get-Unique) | ForEach-Object { [datetime]::Parse($_) } | Sort-Object -Descending | Select-Object -first 1)# -join "," 
+                AppCertificateExpiration = (($appregistration | Select-Object -ExpandProperty keycredentials | Select-Object -ExpandProperty enddatetime |sort-object | Get-Unique) | ForEach-Object { [datetime]::Parse($_) } | Sort-Object -Descending | Select-Object -first 1)# -join ","
                 AppOwners = $AppOwnersCombined
                 AppNotes = $AppRegistration.Notes
             }
@@ -103,5 +104,11 @@ $Results += @(
     }
 )
 
-# Exports a CSV to the desktop 
-$Results | Export-Csv -Path "$env:userprofile\desktop\ExpiringEntraApps - $(Get-Date -Format yyyyMMdd).csv" -NoTypeInformation -Force
+# Narrows the list down to just entries that have expirations in the next X number of days
+$expiration = 45
+$expiringsoon = $results | Where-Object EnterpriseServicePrincipalType -ne "ManagedIdentity" | Where-Object {($_.EnterpriseCertificateExpiration -ne $null -and $_.EnterpriseCertificateExpiration -lt (get-date).adddays($expiration)) -or ($_.AppClientSecretExpiration -ne $null -and $_.AppClientSecretExpiration -lt (get-date).adddays($expiration)) -or ($_.AppCertificateExpiration -ne $null -and $_.AppCertificateExpiration -lt (get-date).adddays($expiration))}
+
+# Exports the results
+$date = get-date -format yyyyMMddHHmmss
+$Results | Export-Csv -path "$env:USERPROFILE\desktop\EntraApps_All_$date.csv" -NoTypeInformation -Force
+$ExpiringSoon | Export-Csv -path "$env:USERPROFILE\desktop\EntraApps_ExpiringSoon_$date.csv" -NoTypeInformation -Force
